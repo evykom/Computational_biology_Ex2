@@ -7,8 +7,8 @@ import csv
 import json
 from pathlib import Path
 
-from fitness import FitnessEvaluator
-from genetic_algorithm import (
+from src.fitness import FitnessEvaluator
+from src.genetic_algorithm import (
     EvolutionStrategy,
     GeneticAlgorithm,
     GeneticAlgorithmConfig,
@@ -18,6 +18,7 @@ from genetic_algorithm import (
 GENETIC_CODE_PATH = Path("genetic_code.json")
 ECOLI_FREQUENCIES_PATH = Path("ecoli_frequencies.json")
 INSULIN_TARGET_PATH = Path("insulin_target.txt")
+CSV_OUTPUT_DIR = Path("csv_files")
 
 STRATEGY_CHOICES = {
     "basic": EvolutionStrategy.DARWINIAN_BASIC,
@@ -83,7 +84,8 @@ def run_strategy(
     print(f"Best fitness score: {result.best_fitness:.2f}")
     print(f"Fitness evaluations: {result.fitness_evaluations}")
     if write_csv:
-        csv_path = Path(f"{strategy.value}_generations.csv")
+        CSV_OUTPUT_DIR.mkdir(exist_ok=True)
+        csv_path = CSV_OUTPUT_DIR / f"{strategy.value}_generations.csv"
         write_generation_csv(csv_path, result)
         print(f"Generation results written to: {csv_path}")
     print()

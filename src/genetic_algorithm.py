@@ -6,8 +6,8 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum
 
-from fitness import FitnessEvaluator
-from local_search import LocalSearch, LocalSearchConfig
+from .fitness import FitnessEvaluator
+from .local_search import LocalSearch, LocalSearchConfig
 
 
 class EvolutionStrategy(Enum):
