@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from fitness import FitnessEvaluator
+from local_search import LocalSearch, LocalSearchConfig
 
 
 class EvolutionStrategy(Enum):
@@ -24,6 +25,15 @@ class GeneticAlgorithmConfig:
     tournament_size: int = 3
     elitism_count: int = 2
     random_seed: int | None = 42
+    local_search_budget: int = 5
+
+
+@dataclass
+class GenerationRecord:
+    generation: int
+    average_fitness: float
+    generation_best_fitness: float
+    best_fitness: float
 
 
 @dataclass
@@ -31,7 +41,7 @@ class GeneticAlgorithmResult:
     best_codons: list[str]
     best_fitness: float
     fitness_evaluations: int
-    generation_history: list[tuple[float, float]] = field(default_factory=list)
+    generation_history: list[GenerationRecord] = field(default_factory=list)
 
 
 class GeneticAlgorithm:
@@ -42,14 +52,18 @@ class GeneticAlgorithm:
         fitness_evaluator: FitnessEvaluator,
         config: GeneticAlgorithmConfig | None = None,
         strategy: EvolutionStrategy = EvolutionStrategy.DARWINIAN_BASIC,
-        local_search_budget: int = 0,
     ) -> None:
         self.target_sequence = target_sequence
         self.genetic_code = genetic_code
         self.fitness_evaluator = fitness_evaluator
         self.config = config or GeneticAlgorithmConfig()
         self.strategy = strategy
-        self.local_search_budget = local_search_budget
+        self.local_search = LocalSearch(
+            target_sequence=target_sequence,
+            genetic_code=genetic_code,
+            codon_frequencies=fitness_evaluator.codon_frequencies,
+            config=LocalSearchConfig(budget=self.config.local_search_budget),
+        )
 
         if self.config.random_seed is not None:
             random.seed(self.config.random_seed)
@@ -62,22 +76,30 @@ class GeneticAlgorithm:
                 raise ValueError(f"No codons available for amino acid '{amino_acid}'")
 
     def run(self) -> GeneticAlgorithmResult:
-        population = [
-            self._create_random_individual()
-            for _ in range(self.config.population_size)
-        ]
-        fitnesses = [self._evaluate_individual(individual) for individual in population]
+        population: list[list[str]] = []
+        phenotypes: list[list[str]] = []
+        fitnesses: list[float] = []
 
-        best_index = max(range(len(population)), key=lambda index: fitnesses[index])
-        best_codons = population[best_index][:]
+        for _ in range(self.config.population_size):
+            genome, phenotype, fitness = self._prepare_individual(self._create_random_individual())
+            population.append(genome)
+            phenotypes.append(phenotype)
+            fitnesses.append(fitness)
+
+        best_index = max(range(len(phenotypes)), key=lambda index: fitnesses[index])
+        best_codons = phenotypes[best_index][:]
         best_fitness = fitnesses[best_index]
-        generation_history: list[tuple[float, float]] = []
+        generation_history: list[GenerationRecord] = [
+            GenerationRecord(
+                generation=0,
+                average_fitness=sum(fitnesses) / len(fitnesses),
+                generation_best_fitness=best_fitness,
+                best_fitness=best_fitness,
+            )
+        ]
         print(f"Generation 0: best score {best_fitness:.2f}")
 
         for generation in range(1, self.config.generations + 1):
-            average_fitness = sum(fitnesses) / len(fitnesses)
-            generation_history.append((average_fitness, best_fitness))
-
             next_population: list[list[str]] = []
             elite_indices = sorted(
                 range(len(population)),
@@ -98,14 +120,27 @@ class GeneticAlgorithm:
                     next_population.append(child_b)
 
             population = next_population
-            fitnesses = [self._evaluate_individual(individual) for individual in population]
+            phenotypes = []
+            fitnesses = []
+            for genome in population:
+                _, phenotype, fitness = self._prepare_individual(genome)
+                phenotypes.append(phenotype)
+                fitnesses.append(fitness)
 
-            generation_best_index = max(range(len(population)), key=lambda index: fitnesses[index])
+            generation_best_index = max(range(len(phenotypes)), key=lambda index: fitnesses[index])
             generation_best_fitness = fitnesses[generation_best_index]
             if generation_best_fitness > best_fitness:
                 best_fitness = generation_best_fitness
-                best_codons = population[generation_best_index][:]
+                best_codons = phenotypes[generation_best_index][:]
 
+            generation_history.append(
+                GenerationRecord(
+                    generation=generation,
+                    average_fitness=sum(fitnesses) / len(fitnesses),
+                    generation_best_fitness=generation_best_fitness,
+                    best_fitness=best_fitness,
+                )
+            )
             print(f"Generation {generation}: best score {best_fitness:.2f}")
 
         return GeneticAlgorithmResult(
@@ -123,6 +158,19 @@ class GeneticAlgorithm:
 
     def _evaluate_individual(self, codons: list[str]) -> float:
         return self.fitness_evaluator.evaluate(codons)
+
+    def _prepare_individual(self, genome: list[str]) -> tuple[list[str], list[str], float]:
+        if self.strategy == EvolutionStrategy.DARWINIAN_BASIC:
+            fitness = self._evaluate_individual(genome)
+            return genome[:], genome[:], fitness
+
+        phenotype = self.local_search.improve(genome)
+        fitness = self._evaluate_individual(phenotype)
+
+        if self.strategy == EvolutionStrategy.LAMARCKIAN:
+            return phenotype[:], phenotype[:], fitness
+
+        return genome[:], phenotype[:], fitness
 
     def _tournament_select(
         self,
